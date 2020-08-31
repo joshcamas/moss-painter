@@ -13,6 +13,6 @@ Seriously, just a proof of concept: it's cool for what it is but lacks the stabi
 
 ## To Do
 * Fix erasing (It literally doesn't work lol)
-* Optimize inflation algorithm (Or just be lazy and have multiple meshes heh heh heh)
+* Optimize inflation algorithm (Octrees?)
 * Add mesh chunking support
 * Add multi-color support
