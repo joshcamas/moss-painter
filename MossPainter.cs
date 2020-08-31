@@ -398,7 +398,7 @@ namespace Ardenfall.Utility
                 List<int> matchingVertices = new List<int>();
                 Vector3 averageDirection = Vector3.zero;
 
-                for (int k = 0; k < vertices.Count; k++)
+                for (int k = i; k < vertices.Count; k++)
                 {
                     //Allow self match
                     if (vertices[i] == vertices[k])
