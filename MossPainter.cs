@@ -15,9 +15,6 @@ namespace Ardenfall.Utility
         private List<Vector3> generatedVertices;
 
         [SerializeField, HideInInspector]
-        private List<int> generatedTriangles;
-
-        [SerializeField, HideInInspector]
         private List<Vector3> generatedNormals;
 
         //Scanned during editor
@@ -38,12 +35,10 @@ namespace Ardenfall.Utility
         //Addition Values
         private List<Vector3> paintingVertices = new List<Vector3>();
         private List<Vector3> paintingNormals = new List<Vector3>();
-        private List<int> paintingTriangles = new List<int>();
 
         //Erasing Values
         private List<Vector3> erasingVertices = new List<Vector3>();
         private List<Vector3> erasingNormals = new List<Vector3>();
-        private List<int> erasingTriangles = new List<int>();
 
         private EditorJobWaiter inflateJobWaiter;
 
@@ -89,15 +84,13 @@ namespace Ardenfall.Utility
 
         public void ApplyPaintedMesh()
         {
-            AddMeshData(paintingVertices, paintingTriangles, paintingNormals, false);
-            EraseMeshData(erasingVertices, erasingTriangles, erasingNormals, false);
+            AddMeshData(paintingVertices, paintingNormals, false);
+            EraseMeshData(erasingVertices, erasingNormals, false);
             GenerateMeshAsync();
 
-            paintingTriangles = new List<int>();
             paintingVertices = new List<Vector3>();
             paintingNormals = new List<Vector3>();
 
-            erasingTriangles = new List<int>();
             erasingVertices = new List<Vector3>();
             erasingNormals = new List<Vector3>();
         }
@@ -144,7 +137,6 @@ namespace Ardenfall.Utility
 
                 var targetVertices = add ? paintingVertices : erasingVertices;
                 var targetNormals = add ? paintingNormals : erasingNormals;
-                var targetTriangles = add ? paintingTriangles : erasingTriangles;
 
                 for (int k = 0; k < triangles.Length; k+=3)
                 {
@@ -172,12 +164,6 @@ namespace Ardenfall.Utility
                     targetNormals.Add(normals[triangles[k+1]]);
                     targetNormals.Add(normals[triangles[k+2]]);
 
-                    //Triangle
-                    int refTriangle = targetTriangles.Count;
-                    targetTriangles.Add(refTriangle);
-                    targetTriangles.Add(refTriangle + 1);
-                    targetTriangles.Add(refTriangle + 2);
-
                     Color debugColor = add ? Color.green : Color.red;
 
                     //Debug Triangles
@@ -195,15 +181,12 @@ namespace Ardenfall.Utility
         {
             DestroyImmediate(mesh);
 
-            generatedTriangles = new List<int>();
             generatedVertices = new List<Vector3>();
             generatedNormals = new List<Vector3>();
 
-            paintingTriangles = new List<int>();
             paintingVertices = new List<Vector3>();
             paintingNormals = new List<Vector3>();
 
-            erasingTriangles = new List<int>();
             erasingVertices = new List<Vector3>();
             erasingNormals = new List<Vector3>();
 
@@ -238,9 +221,6 @@ namespace Ardenfall.Utility
             if (meshFilter.sharedMesh != mesh)
                 meshFilter.sharedMesh = mesh;
 
-            if (generatedTriangles == null)
-                generatedTriangles = new List<int>();
-
             if (generatedVertices == null)
                 generatedVertices = new List<Vector3>();
 
@@ -249,25 +229,25 @@ namespace Ardenfall.Utility
 
         }
 
-        private void EraseMeshData(List<Vector3> eraseVertices, List<int> eraseTriangles, List<Vector3> eraseNormals, bool generateMesh)
+        private void EraseMeshData(List<Vector3> eraseVertices, List<Vector3> eraseNormals, bool generateMesh)
         {
             InitializeMesh();
 
             bool regenerate = false;
 
-            for (int a = 0; a < eraseTriangles.Count; a += 3)
+            for (int a = 0; a < eraseVertices.Count; a += 3)
             {
                 bool skipErase = false;
 
                 //Find self duplication (very common and fast to check)
-                for (int b = a; b < eraseTriangles.Count; b += 3)
+                for (int b = a; b < eraseVertices.Count; b += 3)
                 {
                     if (a == b)
                         continue;
 
-                    if (eraseVertices[eraseTriangles[a]] == eraseVertices[eraseTriangles[b]]
-                    && eraseVertices[eraseTriangles[a + 1]] == eraseVertices[eraseTriangles[b + 1]]
-                    && eraseVertices[eraseTriangles[a + 2]] == eraseVertices[eraseTriangles[b + 2]])
+                    if (eraseVertices[a] == eraseVertices[b]
+                    && eraseVertices[a + 1] == eraseVertices[b + 1]
+                    && eraseVertices[a + 2] == eraseVertices[b + 2])
                     {
                         skipErase = true;
                         break;
@@ -282,11 +262,11 @@ namespace Ardenfall.Utility
 
                 int eraseAt = -1;
 
-                for (int b = 0; b < generatedTriangles.Count; b += 3)
+                for (int b = 0; b < generatedVertices.Count; b += 3)
                 {
-                    if (generatedVertices[generatedTriangles[b]] == eraseVertices[eraseTriangles[a]]
-                    && generatedVertices[generatedTriangles[b + 1]] == eraseVertices[eraseTriangles[a + 1]]
-                    && generatedVertices[generatedTriangles[b + 2]] == eraseVertices[eraseTriangles[a + 2]])
+                    if (generatedVertices[b] == eraseVertices[a]
+                    && generatedVertices[b + 1] == eraseVertices[a + 1]
+                    && generatedVertices[b + 2] == eraseVertices[a + 2])
                     {
                         eraseAt = b;
                         break;
@@ -296,51 +276,39 @@ namespace Ardenfall.Utility
                 if (eraseAt == -1)
                     continue;
 
-                int erase0 = generatedTriangles[eraseAt];
+                generatedVertices.RemoveAt(eraseAt);
+                generatedVertices.RemoveAt(eraseAt);
+                generatedVertices.RemoveAt(eraseAt);
 
-                generatedTriangles.RemoveAt(eraseAt);
-                generatedTriangles.RemoveAt(eraseAt);
-                generatedTriangles.RemoveAt(eraseAt);
-
-                generatedVertices.RemoveAt(erase0);
-                generatedVertices.RemoveAt(erase0);
-                generatedVertices.RemoveAt(erase0);
-
-                generatedNormals.RemoveAt(erase0);
-                generatedNormals.RemoveAt(erase0);
-                generatedNormals.RemoveAt(erase0);
-
-                a -= 3;
-
-                //Shift all later triangles down
-                for (int i = eraseAt; i < generatedTriangles.Count; i++)
-                    generatedTriangles[i] -= 3;
-
+                generatedNormals.RemoveAt(eraseAt);
+                generatedNormals.RemoveAt(eraseAt);
+                generatedNormals.RemoveAt(eraseAt);
             }
 
             if (regenerate && generateMesh)
                 GenerateMeshAsync();
         }
 
-        private void AddMeshData(List<Vector3> addVertices, List<int> addTriangles, List<Vector3> addNormals, bool generateMesh)
+
+        private void AddMeshData(List<Vector3> addVertices, List<Vector3> addNormals, bool generateMesh)
         {
             InitializeMesh();
 
             bool regenerate = false;
 
-            for (int a = 0; a < addTriangles.Count; a += 3)
+            for (int a = 0; a < addVertices.Count; a += 3)
             {
                 bool skipAddition = false;
 
                 //Find self duplication (very common and fast to check)
-                for (int b = a; b < addTriangles.Count; b += 3)
+                for (int b = a; b < addVertices.Count; b += 3)
                 {
                     if (a == b)
                         continue;
 
-                    if (addVertices[addTriangles[a]] == addVertices[addTriangles[b]]
-                    && addVertices[addTriangles[a + 1]] == addVertices[addTriangles[b + 1]]
-                    && addVertices[addTriangles[a + 2]] == addVertices[addTriangles[b + 2]])
+                    if (addVertices[a] == addVertices[b]
+                    && addVertices[a + 1] == addVertices[b + 1]
+                    && addVertices[a + 2] == addVertices[b + 2])
                     {
                         skipAddition = true;
                         break;
@@ -352,11 +320,11 @@ namespace Ardenfall.Utility
                     continue;
                 
                 //Find match with existing generated vertices (less common, slow to check)
-                for (int b = 0; b < generatedTriangles.Count; b += 3)
+                for (int b = 0; b < generatedVertices.Count; b += 3)
                 {
-                    if (generatedVertices[generatedTriangles[b]] == addVertices[addTriangles[a]]
-                    && generatedVertices[generatedTriangles[b + 1]] == addVertices[addTriangles[a + 1]]
-                    && generatedVertices[generatedTriangles[b + 2]] == addVertices[addTriangles[a + 2]])
+                    if (generatedVertices[b] == addVertices[a]
+                    && generatedVertices[b + 1] == addVertices[a + 1]
+                    && generatedVertices[b + 2] == addVertices[a + 2])
                     {
                         skipAddition = true;
                         break;
@@ -369,24 +337,14 @@ namespace Ardenfall.Utility
 
                 regenerate = true;
 
-                int triangleRef = generatedVertices.Count;
-
-                int index0 = addTriangles[a];
-                int index1 = addTriangles[a + 1];
-                int index2 = addTriangles[a + 2];
-
                 //Add!
-                generatedVertices.Add(addVertices[index0]);
-                generatedVertices.Add(addVertices[index1]);
-                generatedVertices.Add(addVertices[index2]);
+                generatedVertices.Add(addVertices[a]);
+                generatedVertices.Add(addVertices[a+1]);
+                generatedVertices.Add(addVertices[a+2]);
 
-                generatedNormals.Add(addNormals[index0]);
-                generatedNormals.Add(addNormals[index1]);
-                generatedNormals.Add(addNormals[index2]);
-
-                generatedTriangles.Add(triangleRef);
-                generatedTriangles.Add(triangleRef + 1);
-                generatedTriangles.Add(triangleRef + 2);
+                generatedNormals.Add(addNormals[a]);
+                generatedNormals.Add(addNormals[a+1]);
+                generatedNormals.Add(addNormals[a+2]);
 
             }
 
@@ -425,9 +383,8 @@ namespace Ardenfall.Utility
                     inflateJob.modifiedVertices.CopyTo(modVertices);
 
                     Vector3[] modNormals = generatedNormals.ToArray();
-                    int[] modTriangles = generatedTriangles.ToArray();
 
-                    GenerateMesh(modVertices, modTriangles, modNormals);
+                    GenerateMesh(modVertices, modNormals);
                 }
 
                 inflateJob.vertices.Dispose();
@@ -437,6 +394,29 @@ namespace Ardenfall.Utility
 
             inflateJobWaiter = new EditorJobWaiter(inflatingJobHandle, onComplete);
             inflateJobWaiter.Start();
+        }
+
+        private void GenerateMesh(Vector3[] vertices, Vector3[] normals)
+        {
+            int[] triangles = new int[vertices.Length];
+            for(int i = 0; i < triangles.Length;i ++)
+            {
+                triangles[i] = i;
+            }
+
+            if (mesh != null)
+                DestroyImmediate(mesh);
+
+            mesh = new Mesh();
+            meshFilter.sharedMesh = mesh;
+
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
+            mesh.normals = normals;
+
+            mesh.Optimize();
+            mesh.OptimizeIndexBuffers();
+            mesh.OptimizeReorderVertexBuffer();
         }
 
         private void GenerateMesh(Vector3[] vertices, int[] triangles, Vector3[] normals)
