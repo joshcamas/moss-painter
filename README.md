@@ -10,9 +10,10 @@ Seriously, just a proof of concept: it's cool for what it is but lacks the stabi
 * Perfect for low poly scenes :)) Terrible for high poly scenes :))
 * Inflates moss to be on top of static meshes
 * Put some effort into optimization
+* Uses jobs to inflate mesh, but this still takes a few seconds in the background
 
 ## To Do
 * Fix erasing (It literally doesn't work lol)
-* Optimize inflation algorithm (Octrees?)
+* Optimize inflation algorithm more
 * Add mesh chunking support
 * Add multi-color support
