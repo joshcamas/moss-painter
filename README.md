@@ -9,11 +9,10 @@ Seriously, just a proof of concept: it's cool for what it is but lacks the stabi
 * Paint geometry on any static surface in a scene
 * Perfect for low poly scenes :)) Terrible for high poly scenes :))
 * Inflates moss to be on top of static meshes
-* Quite unoptimized
+* Uses jobs / burst
 
 ## To Do
-* Jobify addition/subtraction
-* Optimize inflation algorithm more (bounds check)
+* Optimize mesh generation
 * Add mesh chunking support
 * Add multi-color support
 * Add support for terrain 
