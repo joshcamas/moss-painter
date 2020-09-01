@@ -8,7 +8,8 @@ namespace ArdenfallEditor.Utility
     public class MossPainterEditor : Editor
     {
         private float brushSize = 2;
-        private float brushAngleAllowance = 2;
+        private float brushAngleAllowance = 40;
+        private float brushSubtractionAngleAllowance = 360;
 
         private bool brushDown;
 
@@ -28,6 +29,7 @@ namespace ArdenfallEditor.Utility
 
             brushSize = EditorGUILayout.FloatField("Size", brushSize);
             brushAngleAllowance = EditorGUILayout.FloatField("Angle", brushAngleAllowance);
+            brushSubtractionAngleAllowance = EditorGUILayout.FloatField("Subtraction Angle", brushSubtractionAngleAllowance);
 
             if (GUILayout.Button("Clear"))
             {
@@ -78,7 +80,8 @@ namespace ArdenfallEditor.Utility
 
         private void Paint(Vector3 position, Vector3 direction,bool add)
         {
-            Painter.PaintAtLocation(position, brushSize, add, direction,brushAngleAllowance);
+            Painter.PaintAtLocation(position, brushSize, add, direction, add ? brushAngleAllowance : brushSubtractionAngleAllowance);
+            Painter.DisplayPaintGUI(position, brushSize, add, direction, add ? brushAngleAllowance : brushSubtractionAngleAllowance);
         }
 
         //Paints in area depending on editor mouse position
