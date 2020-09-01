@@ -421,13 +421,13 @@ namespace Ardenfall.Utility
             {
                 if(success)
                 {
-                    Vector3[] vertices = new Vector3[generatedVertices.Count];
+                    Vector3[] modVertices = new Vector3[generatedVertices.Count];
                     inflateJob.modifiedVertices.CopyTo(vertices);
 
-                    Vector3[] normals = generatedNormals.ToArray();
-                    int[] triangles = generatedTriangles.ToArray();
+                    Vector3[] modNormals = generatedNormals.ToArray();
+                    int[] modTriangles = generatedTriangles.ToArray();
 
-                    GenerateMesh(vertices, triangles, normals);
+                    GenerateMesh(modVertices, modTriangles, modNormals);
                 }
 
                 inflateJob.vertices.Dispose();
