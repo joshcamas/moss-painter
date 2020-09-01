@@ -4,6 +4,8 @@ using UnityEngine;
 using Unity.Collections;
 using Unity.Jobs;
 using System;
+using Unity.Burst;
+using Unity.Entities.UniversalDelegates;
 
 namespace Ardenfall.Utility
 {
@@ -12,10 +14,10 @@ namespace Ardenfall.Utility
         [SerializeField] private float mossDistance = 0.01f;
 
         [SerializeField, HideInInspector]
-        private List<Vector3> generatedVertices;
+        private List<Vector3> generatedVertices = new List<Vector3>();
 
         [SerializeField, HideInInspector]
-        private List<Vector3> generatedNormals;
+        private List<Vector3> generatedNormals = new List<Vector3>();
 
         //Scanned during editor
         private List<MeshFilter> scannedFilters;
@@ -32,15 +34,17 @@ namespace Ardenfall.Utility
         private MeshRenderer meshRenderer;
         private Mesh mesh;
 
-        //Addition Values
+        private bool isPaintAdding;
+        private float paintSize;
+        private Vector3 paintDirection;
+        private float paintDirectionAllowance;
+        private List<Vector3> paintPositionFrames;
+
         private List<Vector3> paintingVertices = new List<Vector3>();
         private List<Vector3> paintingNormals = new List<Vector3>();
 
-        //Erasing Values
-        private List<Vector3> erasingVertices = new List<Vector3>();
-        private List<Vector3> erasingNormals = new List<Vector3>();
-
         private EditorJobWaiter inflateJobWaiter;
+        private EditorJobWaiter findDuplicatesJobWaiter;
 
         //Sets all meshes in scene
         public void SetScannedMeshFilters(MeshFilter[] filters)
@@ -84,18 +88,146 @@ namespace Ardenfall.Utility
 
         public void ApplyPaintedMesh()
         {
-            AddMeshData(paintingVertices, paintingNormals, false);
-            EraseMeshData(erasingVertices, erasingNormals, false);
-            GenerateMeshAsync();
+            BuildPaintList();
+
+            if (isPaintAdding)
+                AddMeshData(paintingVertices, paintingNormals,true);
+            else
+                EraseMeshData(paintingVertices,true);
+
+            paintPositionFrames = new List<Vector3>();
 
             paintingVertices = new List<Vector3>();
             paintingNormals = new List<Vector3>();
-
-            erasingVertices = new List<Vector3>();
-            erasingNormals = new List<Vector3>();
         }
 
-        public void PaintAtLocation(Vector3 position,float size, bool add, Vector3 paintDirection, float paintDirectionAllowance)
+        public void PaintAtLocation(Vector3 position, float size, bool add, Vector3 paintDirection, float paintDirectionAllowance)
+        {
+            this.isPaintAdding = add;
+            this.paintSize = size;
+            this.paintDirection = paintDirection;
+            this.paintDirectionAllowance = paintDirectionAllowance;
+
+            if (this.paintPositionFrames == null)
+                this.paintPositionFrames = new List<Vector3>();
+
+            this.paintPositionFrames.Add(position);
+        }
+
+        private void BuildPaintList()
+        {
+            if (paintPositionFrames.Count == 0)
+                return;
+
+            if (scannedFilters == null)
+                return;
+
+            Vector3 size = new Vector3(paintSize, paintSize, paintSize);
+            float paintSizeSqrd = Mathf.Pow(paintSize, 2);
+
+            Bounds bounds = new Bounds(paintPositionFrames[0], size);
+
+            for(int i = 0; i < paintPositionFrames.Count; i++)
+                bounds.Encapsulate(new Bounds(paintPositionFrames[i], size));
+
+            int count = FiltersInBounds(bounds, objectBuffer);
+
+            for(int i = 0; i < count; i++)
+            {
+                if (!ScanObject(objectBuffer[i]))
+                    continue;
+
+                List<int> framesInside = new List<int>();
+
+                for (int k = 0; k < paintPositionFrames.Count; k++)
+                {
+                    Bounds frameBounds = new Bounds(paintPositionFrames[k], size);
+                    if (FilterInBounds(frameBounds, objectBuffer[i]))
+                        framesInside.Add(k);
+                }
+
+                if (framesInside.Count == 0)
+                    continue;
+
+                var vertices = scannedVertices[objectBuffer[i]];
+                var triangles = scannedTriangles[objectBuffer[i]];
+                var normals = scannedNormals[objectBuffer[i]];
+
+                for (int k = 0; k < triangles.Length; k += 3)
+                {
+                    //Check angle
+                    if (Vector3.Angle(paintDirection, normals[triangles[k]]) > paintDirectionAllowance)
+                        continue;
+
+                    //Check if this triangle is in at least one frame's bounds
+
+                    bool vertexInsideA = false;
+                    bool vertexInsideB = false;
+                    bool vertexInsideC = false;
+
+                    for (int j = 0; j < framesInside.Count; j++)
+                    {
+                        Vector3 framePos = paintPositionFrames[framesInside[j]];
+
+                        if (!vertexInsideA && Vector3.SqrMagnitude(framePos - vertices[triangles[k]]) < paintSizeSqrd)
+                            vertexInsideA = true;
+
+                        if (!vertexInsideB && Vector3.SqrMagnitude(framePos - vertices[triangles[k + 1]]) >= paintSizeSqrd)
+                            vertexInsideB = true;
+
+                        if (!vertexInsideC && Vector3.SqrMagnitude(framePos - vertices[triangles[k + 2]]) >= paintSizeSqrd)
+                            vertexInsideC = true;
+
+                        if(vertexInsideA && vertexInsideB && vertexInsideC)
+                            break;
+
+                    }
+
+                    if (!vertexInsideA || !vertexInsideB || !vertexInsideC)
+                        continue;
+
+                    paintingVertices.Add(vertices[triangles[k]]);
+                    paintingVertices.Add(vertices[triangles[k + 1]]);
+                    paintingVertices.Add(vertices[triangles[k + 2]]);
+
+                    //Normal
+                    paintingNormals.Add(normals[triangles[k]]);
+                    paintingNormals.Add(normals[triangles[k + 1]]);
+                    paintingNormals.Add(normals[triangles[k + 2]]);
+                }
+
+            }
+        }
+
+        private bool ScanObject(int index)
+        {
+            if (scannedVertices[index] != null)
+                return true;
+
+            MeshFilter filter = scannedFilters[index];
+
+            if (filter == null || filter.sharedMesh == null)
+                return false;
+
+            var filterVertices = filter.sharedMesh.vertices;
+            var filterNormals = filter.sharedMesh.normals;
+
+            //Transform vertices / normals
+            for (int k = 0; k < filterVertices.Length; k++)
+            {
+                filterVertices[k] = filter.transform.TransformPoint(filterVertices[k]);
+                filterNormals[k] = filter.transform.TransformDirection(filterNormals[k]);
+            }
+
+            scannedVertices[index] = filterVertices;
+            scannedNormals[index] = filterNormals;
+
+            scannedTriangles[index] = filter.sharedMesh.triangles;
+
+            return true;
+        }
+
+        public void DisplayPaintGUI(Vector3 position,float size, bool add, Vector3 paintDirection, float paintDirectionAllowance)
         {
             if (scannedFilters == null)
                 return;
@@ -107,36 +239,12 @@ namespace Ardenfall.Utility
 
             for(int i = 0;i < count; i++)
             {
-                //Grab scanned vertices
-                if (scannedVertices[objectBuffer[i]] == null)
-                {
-                    MeshFilter filter = scannedFilters[objectBuffer[i]];
-
-                    if (filter == null || filter.sharedMesh == null)
-                        continue;
-
-                    var filterVertices = filter.sharedMesh.vertices;
-                    var filterNormals = filter.sharedMesh.normals;
-
-                    //Transform vertices / normals
-                    for(int k = 0; k < filterVertices.Length; k++)
-                    {
-                        filterVertices[k] = filter.transform.TransformPoint(filterVertices[k]);
-                        filterNormals[k] = filter.transform.TransformDirection(filterNormals[k]);
-                    }
-
-                    scannedVertices[objectBuffer[i]] = filterVertices;
-                    scannedNormals[objectBuffer[i]] = filterNormals;
-
-                    scannedTriangles[objectBuffer[i]] = filter.sharedMesh.triangles;
-                }
+                if (!ScanObject(objectBuffer[i]))
+                    continue;
 
                 var vertices = scannedVertices[objectBuffer[i]];
                 var triangles = scannedTriangles[objectBuffer[i]];
                 var normals = scannedNormals[objectBuffer[i]];
-
-                var targetVertices = add ? paintingVertices : erasingVertices;
-                var targetNormals = add ? paintingNormals : erasingNormals;
 
                 for (int k = 0; k < triangles.Length; k+=3)
                 {
@@ -154,25 +262,13 @@ namespace Ardenfall.Utility
                     if (Vector3.SqrMagnitude(position - vertices[triangles[k+2]]) >= distSqu)
                         continue;
 
-                    //Vertices
-                    targetVertices.Add(vertices[triangles[k]]);
-                    targetVertices.Add(vertices[triangles[k+1]]);
-                    targetVertices.Add(vertices[triangles[k+2]]);
-
-                    //Normal
-                    targetNormals.Add(normals[triangles[k]]);
-                    targetNormals.Add(normals[triangles[k+1]]);
-                    targetNormals.Add(normals[triangles[k+2]]);
-
                     Color debugColor = add ? Color.green : Color.red;
 
                     //Debug Triangles
                     Debug.DrawLine(vertices[triangles[k]], vertices[triangles[k + 1]], debugColor, .1f);
                     Debug.DrawLine(vertices[triangles[k+1]], vertices[triangles[k + 2]], debugColor, .1f);
                     Debug.DrawLine(vertices[triangles[k+2]], vertices[triangles[k]], debugColor, .1f);
-
                 }
-
             }
 
         }
@@ -187,178 +283,109 @@ namespace Ardenfall.Utility
             paintingVertices = new List<Vector3>();
             paintingNormals = new List<Vector3>();
 
-            erasingVertices = new List<Vector3>();
-            erasingNormals = new List<Vector3>();
+            paintPositionFrames = new List<Vector3>();
 
             if (inflateJobWaiter != null && inflateJobWaiter.IsRunning)
                 inflateJobWaiter.ForceCancel();
         }
 
-        private void InitializeMesh()
+        private void EraseMeshData(List<Vector3> eraseVertices, bool regenerate)
         {
-            if (meshFilter == null)
+            FindDuplicateMeshData(eraseVertices, (duplicates) =>
             {
-                meshFilter = GetComponent<MeshFilter>();
+                List<int> removeTriangles = new List<int>();
 
-                if (meshFilter == null)
-                    meshFilter = gameObject.AddComponent<MeshFilter>();
-            }
+                for (int a = 0; a < eraseVertices.Count; a += 3)
+                {
+                    if (duplicates[a] != -1)
+                        removeTriangles.Add(duplicates[a]);
+                }
 
-            if (meshRenderer == null)
-            {
-                meshRenderer = GetComponent<MeshRenderer>();
+                //Remove triangles in reverse, so the old indices still map correctly
 
-                if (meshRenderer == null)
-                    meshRenderer = gameObject.AddComponent<MeshRenderer>();
-            }
+                removeTriangles.Sort();
 
-            if (mesh == null)
-            {
-                mesh = new Mesh();
-                meshFilter.sharedMesh = mesh;
-            }
+                for(int i = removeTriangles.Count-1; i >= 0; i++)
+                {
+                    generatedVertices.RemoveAt(removeTriangles[i] - 2);
+                    generatedVertices.RemoveAt(removeTriangles[i] - 2);
+                    generatedVertices.RemoveAt(removeTriangles[i] - 2);
 
-            if (meshFilter.sharedMesh != mesh)
-                meshFilter.sharedMesh = mesh;
+                    generatedNormals.RemoveAt(removeTriangles[i] - 2);
+                    generatedNormals.RemoveAt(removeTriangles[i] - 2);
+                    generatedNormals.RemoveAt(removeTriangles[i] - 2);
+                }
 
-            if (generatedVertices == null)
-                generatedVertices = new List<Vector3>();
-
-            if (generatedNormals == null)
-                generatedNormals = new List<Vector3>();
-
+                if(regenerate)
+                    GenerateMeshAsync();
+            });
         }
 
-        private void EraseMeshData(List<Vector3> eraseVertices, List<Vector3> eraseNormals, bool generateMesh)
+        private void AddMeshData(List<Vector3> addVertices, List<Vector3> addNormals, bool regenerate)
         {
-            InitializeMesh();
+            FindDuplicateMeshData(addVertices, (duplicates) =>
+             {
+                 for (int i = 0; i < addVertices.Count; i += 3)
+                 {
+                     if (duplicates[i] != -1)
+                         continue;
 
-            bool regenerate = false;
+                     generatedVertices.Add(addVertices[i]);
+                     generatedVertices.Add(addVertices[i + 1]);
+                     generatedVertices.Add(addVertices[i + 2]);
 
-            for (int a = 0; a < eraseVertices.Count; a += 3)
-            {
-                bool skipErase = false;
+                     generatedNormals.Add(addNormals[i]);
+                     generatedNormals.Add(addNormals[i + 1]);
+                     generatedNormals.Add(addNormals[i + 2]);
+                 }
 
-                //Find self duplication (very common and fast to check)
-                for (int b = a; b < eraseVertices.Count; b += 3)
-                {
-                    if (a == b)
-                        continue;
-
-                    if (eraseVertices[a] == eraseVertices[b]
-                    && eraseVertices[a + 1] == eraseVertices[b + 1]
-                    && eraseVertices[a + 2] == eraseVertices[b + 2])
-                    {
-                        skipErase = true;
-                        break;
-                    }
-                }
-
-                //Skip!
-                if (skipErase)
-                    continue;
-
-                //Now try erasing
-
-                int eraseAt = -1;
-
-                for (int b = 0; b < generatedVertices.Count; b += 3)
-                {
-                    if (generatedVertices[b] == eraseVertices[a]
-                    && generatedVertices[b + 1] == eraseVertices[a + 1]
-                    && generatedVertices[b + 2] == eraseVertices[a + 2])
-                    {
-                        eraseAt = b;
-                        break;
-                    }
-                }
-
-                if (eraseAt == -1)
-                    continue;
-
-                generatedVertices.RemoveAt(eraseAt);
-                generatedVertices.RemoveAt(eraseAt);
-                generatedVertices.RemoveAt(eraseAt);
-
-                generatedNormals.RemoveAt(eraseAt);
-                generatedNormals.RemoveAt(eraseAt);
-                generatedNormals.RemoveAt(eraseAt);
-            }
-
-            if (regenerate && generateMesh)
-                GenerateMeshAsync();
+                 if (regenerate)
+                     GenerateMeshAsync();
+             });
         }
 
-
-        private void AddMeshData(List<Vector3> addVertices, List<Vector3> addNormals, bool generateMesh)
+        private void FindDuplicateMeshData(List<Vector3> addVertices,Action<int[]> onComplete)
         {
-            InitializeMesh();
+            if (findDuplicatesJobWaiter != null && findDuplicatesJobWaiter.IsRunning)
+                findDuplicatesJobWaiter.ForceCancel();
 
-            bool regenerate = false;
+            var newVertices = new NativeArray<Vector3>(addVertices.ToArray(), Allocator.Persistent);
+            var oldVertices = new NativeArray<Vector3>(generatedVertices.ToArray(), Allocator.Persistent);
+            var duplicateVertices = new NativeArray<int>(addVertices.Count, Allocator.Persistent);
 
-            for (int a = 0; a < addVertices.Count; a += 3)
+            FindDuplicateMeshJob job = new FindDuplicateMeshJob()
             {
-                bool skipAddition = false;
+                newVertices = newVertices,
+                oldVertices = oldVertices,
+                duplicateVertices = duplicateVertices
+            };
 
-                //Find self duplication (very common and fast to check)
-                for (int b = a; b < addVertices.Count; b += 3)
+            JobHandle duplicateJobHandle = job.Schedule(addVertices.Count, 64);
+            JobHandle.ScheduleBatchedJobs();
+
+            Action<bool> onJobComplete = (success) =>
+            {
+                if (success)
                 {
-                    if (a == b)
-                        continue;
-
-                    if (addVertices[a] == addVertices[b]
-                    && addVertices[a + 1] == addVertices[b + 1]
-                    && addVertices[a + 2] == addVertices[b + 2])
-                    {
-                        skipAddition = true;
-                        break;
-                    }
+                    int[] duplicates = new int[addVertices.Count];
+                    job.duplicateVertices.CopyTo(duplicates);
+                    onComplete?.Invoke(duplicates);
                 }
 
-                //Skip!
-                if (skipAddition)
-                    continue;
-                
-                //Find match with existing generated vertices (less common, slow to check)
-                for (int b = 0; b < generatedVertices.Count; b += 3)
-                {
-                    if (generatedVertices[b] == addVertices[a]
-                    && generatedVertices[b + 1] == addVertices[a + 1]
-                    && generatedVertices[b + 2] == addVertices[a + 2])
-                    {
-                        skipAddition = true;
-                        break;
-                    }
-                }
+                job.duplicateVertices.Dispose();
+                job.newVertices.Dispose();
+                job.oldVertices.Dispose();
+            };
 
-                //Skip!
-                if (skipAddition)
-                    continue;
+            findDuplicatesJobWaiter = new EditorJobWaiter(duplicateJobHandle, onJobComplete);
+            findDuplicatesJobWaiter.Start();
 
-                regenerate = true;
-
-                //Add!
-                generatedVertices.Add(addVertices[a]);
-                generatedVertices.Add(addVertices[a+1]);
-                generatedVertices.Add(addVertices[a+2]);
-
-                generatedNormals.Add(addNormals[a]);
-                generatedNormals.Add(addNormals[a+1]);
-                generatedNormals.Add(addNormals[a+2]);
-
-            }
-
-            if (regenerate && generateMesh)
-                GenerateMeshAsync();
         }
 
         private void GenerateMeshAsync()
         {
             if(inflateJobWaiter != null && inflateJobWaiter.IsRunning)
-            {
                 inflateJobWaiter.ForceCancel();
-                return;
-            }
 
             var vertices = new NativeArray<Vector3>(generatedVertices.ToArray(), Allocator.Persistent);
             var normals = new NativeArray<Vector3>(generatedNormals.ToArray(), Allocator.Persistent);
@@ -396,8 +423,30 @@ namespace Ardenfall.Utility
             inflateJobWaiter.Start();
         }
 
+        private void InitializeMesh()
+        {
+            if (meshFilter == null)
+            {
+                meshFilter = GetComponent<MeshFilter>();
+
+                if (meshFilter == null)
+                    meshFilter = gameObject.AddComponent<MeshFilter>();
+            }
+
+            if (meshRenderer == null)
+            {
+                meshRenderer = GetComponent<MeshRenderer>();
+
+                if (meshRenderer == null)
+                    meshRenderer = gameObject.AddComponent<MeshRenderer>();
+            }
+
+        }
+
         private void GenerateMesh(Vector3[] vertices, Vector3[] normals)
         {
+            InitializeMesh();
+
             int[] triangles = new int[vertices.Length];
             for(int i = 0; i < triangles.Length;i ++)
             {
@@ -419,15 +468,9 @@ namespace Ardenfall.Utility
             mesh.OptimizeReorderVertexBuffer();
         }
 
-        private void GenerateMesh(Vector3[] vertices, int[] triangles, Vector3[] normals)
+        private bool FilterInBounds(Bounds bounds, int index)
         {
-            mesh.vertices = vertices;
-            mesh.triangles = triangles;
-            mesh.normals = normals;
-
-            mesh.Optimize();
-            mesh.OptimizeIndexBuffers();
-            mesh.OptimizeReorderVertexBuffer();
+            return scannedRenderers[index].bounds.Intersects(bounds);
         }
 
         private int FiltersInBounds(Bounds bounds, int[] buffer)
@@ -449,6 +492,35 @@ namespace Ardenfall.Utility
             return index;
         }
 
+        [BurstCompile]
+        struct FindDuplicateMeshJob: IJobParallelFor
+        {
+            [ReadOnly]
+            public NativeArray<Vector3> newVertices;
+
+            [ReadOnly]
+            public NativeArray<Vector3> oldVertices;
+
+            public NativeArray<int> duplicateVertices;
+
+            public void Execute(int i)
+            {
+                for (int b = 0; b < oldVertices.Length; b += 3)
+                {
+                    if (oldVertices[b] == newVertices[i]
+                    && oldVertices[b + 1] == newVertices[i + 1]
+                    && oldVertices[b + 2] == newVertices[i + 2])
+                    {
+                        duplicateVertices[i] = b;
+                        return;
+                    }
+                }
+
+                duplicateVertices[i] = -1;
+            }
+        }
+
+        [BurstCompile]
         struct InflateMeshJobMulti : IJobParallelFor
         {
             [ReadOnly]
@@ -456,24 +528,18 @@ namespace Ardenfall.Utility
 
             [ReadOnly]
             public NativeArray<Vector3> normals;
+
             public float inflateAmount;
 
             public NativeArray<Vector3> modifiedVertices;
 
             public void Execute(int i)
             {
-                List<int> matchingVertices = new List<int>();
                 Vector3 averageDirection = Vector3.zero;
 
                 for (int k = 0; k < vertices.Length; k++)
-                {
-                    //Allow self match
                     if (vertices[i] == vertices[k])
-                    {
                         averageDirection += normals[k];
-                        matchingVertices.Add(k);
-                    }
-                }
 
                 modifiedVertices[i] = vertices[i] + averageDirection * inflateAmount;
             }
