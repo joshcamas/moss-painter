@@ -13,7 +13,9 @@ Seriously, just a proof of concept: it's cool for what it is but lacks the stabi
 * Uses jobs to inflate mesh, but this still takes a few seconds in the background
 
 ## To Do
-* Fix erasing (It literally doesn't work lol)
-* Optimize inflation algorithm more
+* Jobify addition/subtraction
+* Optimize inflation algorithm more (bounds check)
 * Add mesh chunking support
 * Add multi-color support
+* Add support for terrain 
+* Add better filtering (material, object, layer)
