@@ -10,6 +10,7 @@ namespace Ardenfall.Utility
     {
         private Action<bool> onComplete;
         private JobHandle handler;
+
         private bool running = false;
 
         public EditorJobWaiter(JobHandle handler, Action<bool> onComplete)
@@ -36,14 +37,15 @@ namespace Ardenfall.Utility
         /// </summary>
         public void ForceCancel()
         {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.update -= Update;
+#endif
+
             handler.Complete();
             running = false;
 
             onComplete?.Invoke(false);
 
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.update -= Update;
-#endif
         }
 
         /// <summary>
@@ -51,29 +53,31 @@ namespace Ardenfall.Utility
         /// </summary>
         public void ForceComplete()
         {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.update -= Update;
+#endif
+
             handler.Complete();
             running = false;
 
             onComplete?.Invoke(true);
 
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.update -= Update;
-#endif
         }
 
         private void Update()
         {
             if(handler.IsCompleted)
             {
+#if UNITY_EDITOR
+                UnityEditor.EditorApplication.update -= Update;
+#endif
+
                 running = false;
 
                 handler.Complete();
 
                 onComplete?.Invoke(true);
 
-#if UNITY_EDITOR
-            UnityEditor.EditorApplication.update -= Update;
-#endif
             }
         }
     }
