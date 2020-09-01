@@ -1,6 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+using Unity.Collections;
+using Unity.Jobs;
+using System;
+
 namespace Ardenfall.Utility
 {
     public class MossPainter : MonoBehaviour
@@ -40,6 +44,8 @@ namespace Ardenfall.Utility
         private List<Vector3> erasingVertices = new List<Vector3>();
         private List<Vector3> erasingNormals = new List<Vector3>();
         private List<int> erasingTriangles = new List<int>();
+
+        private EditorJobWaiter inflateJobWaiter;
 
         //Sets all meshes in scene
         public void SetScannedMeshFilters(MeshFilter[] filters)
@@ -85,7 +91,7 @@ namespace Ardenfall.Utility
         {
             AddMeshData(paintingVertices, paintingTriangles, paintingNormals, false);
             EraseMeshData(erasingVertices, erasingTriangles, erasingNormals, false);
-            GenerateMesh();
+            GenerateMeshAsync();
 
             paintingTriangles = new List<int>();
             paintingVertices = new List<Vector3>();
@@ -200,6 +206,9 @@ namespace Ardenfall.Utility
             erasingTriangles = new List<int>();
             erasingVertices = new List<Vector3>();
             erasingNormals = new List<Vector3>();
+
+            if (inflateJobWaiter != null && inflateJobWaiter.IsRunning)
+                inflateJobWaiter.ForceCancel();
         }
 
         private void InitializeMesh()
@@ -310,7 +319,7 @@ namespace Ardenfall.Utility
             }
 
             if (regenerate && generateMesh)
-                GenerateMesh();
+                GenerateMeshAsync();
         }
 
         private void AddMeshData(List<Vector3> addVertices, List<int> addTriangles, List<Vector3> addNormals, bool generateMesh)
@@ -382,52 +391,56 @@ namespace Ardenfall.Utility
             }
 
             if (regenerate && generateMesh)
-                GenerateMesh();
+                GenerateMeshAsync();
         }
 
-        private Vector3[] InflateVertices(List<Vector3> vertices, List<Vector3> normals, float amount)
+        private void GenerateMeshAsync()
         {
-            Vector3[] inflatedVertices = new Vector3[vertices.Count];
-            bool[] affectedVertices = new bool[vertices.Count];
-
-            for (int i = 0; i < vertices.Count; i++)
+            if(inflateJobWaiter != null && inflateJobWaiter.IsRunning)
             {
-                if (affectedVertices[i] == true)
-                    continue;
-
-                List<int> matchingVertices = new List<int>();
-                Vector3 averageDirection = Vector3.zero;
-
-                for (int k = i; k < vertices.Count; k++)
-                {
-                    //Allow self match
-                    if (vertices[i] == vertices[k])
-                    {
-                        averageDirection += normals[k];
-                        matchingVertices.Add(k);
-                    }
-                }
-
-                //Move em all now
-                for (int k = 0; k < matchingVertices.Count; k++)
-                {
-                    inflatedVertices[matchingVertices[k]] = vertices[matchingVertices[k]] + averageDirection * amount;
-                    affectedVertices[matchingVertices[k]] = true;
-                }
+                inflateJobWaiter.ForceCancel();
+                return;
             }
 
-            return inflatedVertices;
+            var vertices = new NativeArray<Vector3>(generatedVertices.ToArray(), Allocator.Persistent);
+            var normals = new NativeArray<Vector3>(generatedNormals.ToArray(), Allocator.Persistent);
+            var modifiedVertices = new NativeArray<Vector3>(generatedVertices.Count, Allocator.Persistent);
 
+            InflateMeshJobMulti inflateJob = new InflateMeshJobMulti()
+            {
+                vertices = vertices,
+                normals = normals,
+                modifiedVertices = modifiedVertices,
+                inflateAmount = mossDistance
+            };
+
+            JobHandle inflatingJobHandle = inflateJob.Schedule(generatedVertices.Count, 64);
+            JobHandle.ScheduleBatchedJobs();
+
+            Action<bool> onComplete = (success) =>
+            {
+                if(success)
+                {
+                    Vector3[] vertices = new Vector3[generatedVertices.Count];
+                    inflateJob.modifiedVertices.CopyTo(vertices);
+
+                    Vector3[] normals = generatedNormals.ToArray();
+                    int[] triangles = generatedTriangles.ToArray();
+
+                    GenerateMesh(vertices, triangles, normals);
+                }
+
+                inflateJob.vertices.Dispose();
+                inflateJob.normals.Dispose();
+                inflateJob.modifiedVertices.Dispose();
+            };
+
+            inflateJobWaiter = new EditorJobWaiter(inflatingJobHandle, onComplete);
+            inflateJobWaiter.Start();
         }
 
-        private void GenerateMesh()
+        private void GenerateMesh(Vector3[] vertices, int[] triangles, Vector3[] normals)
         {
-            var inflatedVertices = InflateVertices(generatedVertices, generatedNormals, mossDistance);
-
-            var vertices = inflatedVertices;
-            var triangles = generatedTriangles.ToArray();
-            var normals = generatedNormals.ToArray();
-
             mesh.vertices = vertices;
             mesh.triangles = triangles;
             mesh.normals = normals;
@@ -437,7 +450,6 @@ namespace Ardenfall.Utility
             mesh.OptimizeReorderVertexBuffer();
         }
 
-        //Obviously VERY slow
         private int FiltersInBounds(Bounds bounds, int[] buffer)
         {
             int index = 0;
@@ -455,6 +467,36 @@ namespace Ardenfall.Utility
             }
 
             return index;
+        }
+
+        struct InflateMeshJobMulti : IJobParallelFor
+        {
+            [ReadOnly]
+            public NativeArray<Vector3> vertices;
+
+            [ReadOnly]
+            public NativeArray<Vector3> normals;
+            public float inflateAmount;
+
+            public NativeArray<Vector3> modifiedVertices;
+
+            public void Execute(int i)
+            {
+                List<int> matchingVertices = new List<int>();
+                Vector3 averageDirection = Vector3.zero;
+
+                for (int k = 0; k < vertices.Length; k++)
+                {
+                    //Allow self match
+                    if (vertices[i] == vertices[k])
+                    {
+                        averageDirection += normals[k];
+                        matchingVertices.Add(k);
+                    }
+                }
+
+                modifiedVertices[i] = vertices[i] + averageDirection * inflateAmount;
+            }
         }
 
     }
