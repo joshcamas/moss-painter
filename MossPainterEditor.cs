@@ -12,6 +12,9 @@ namespace ArdenfallEditor.Utility
 
         private bool brushDown;
 
+        private bool setBrushAngle;
+        private Vector3 brushDirection;
+
         private MossPainter Painter => target as MossPainter;
 
         private void OnEnable()
@@ -55,7 +58,10 @@ namespace ArdenfallEditor.Utility
             if (Event.current.type == EventType.MouseUp && Event.current.button == 0)
             {
                 if (brushDown)
+                {
                     Painter.ApplyPaintedMesh();
+                    setBrushAngle = false;
+                }
 
                 brushDown = false;
                 Event.current.Use();
@@ -85,8 +91,14 @@ namespace ArdenfallEditor.Utility
             
             if(Physics.Raycast(ray.origin, ray.direction, out hit))
             {
+                if(!setBrushAngle)
+                {
+                    brushDirection = hit.normal;
+                    setBrushAngle = true;
+                }
+
                 bool add = !e.shift;
-                Paint(hit.point, hit.normal, add);
+                Paint(hit.point, brushDirection, add);
             }
 
         }
@@ -102,14 +114,16 @@ namespace ArdenfallEditor.Utility
 
             if (Physics.Raycast(ray.origin, ray.direction, out hit))
             {
+                Vector3 dir = setBrushAngle ? brushDirection : hit.normal;
+
                 //Outside
                 Handles.color = GetBrushColor(false);
-                Handles.CircleHandleCap(2, hit.point, Quaternion.LookRotation(hit.normal), brushSize,
+                Handles.CircleHandleCap(2, hit.point, Quaternion.LookRotation(dir), brushSize,
                 EventType.Repaint);
 
                 //Inside
                 Handles.color = GetBrushColor(true);
-                Handles.DrawSolidDisc(hit.point, hit.normal, brushSize);
+                Handles.DrawSolidDisc(hit.point, dir, brushSize);
             }
 
         }
