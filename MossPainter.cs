@@ -422,7 +422,7 @@ namespace Ardenfall.Utility
                 if(success)
                 {
                     Vector3[] modVertices = new Vector3[generatedVertices.Count];
-                    inflateJob.modifiedVertices.CopyTo(vertices);
+                    inflateJob.modifiedVertices.CopyTo(modVertices);
 
                     Vector3[] modNormals = generatedNormals.ToArray();
                     int[] modTriangles = generatedTriangles.ToArray();
